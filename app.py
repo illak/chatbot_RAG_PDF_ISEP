@@ -10,6 +10,8 @@ from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
+from langchain_core.output_parsers import StrOutputParser
+
 load_dotenv()
 os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -73,7 +75,10 @@ def get_conversational_chain():
                                    )
     prompt = PromptTemplate(template=prompt_template,
                             input_variables=["context", "question"])
-    chain = load_qa_chain(llm=model, chain_type="stuff", prompt=prompt)
+    #chain = load_qa_chain(llm=model, chain_type="stuff", prompt=prompt)
+
+    chain = prompt | model | StrOutputParser()
+
     return chain
 
 
@@ -95,9 +100,11 @@ def user_input(user_question):
     print("\n%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n")
 
     chain = get_conversational_chain()
-
-    response = chain(
-        {"input_documents": docs, "question": user_question}, return_only_outputs=True, )
+    
+    response = chain.stream({
+            "context": docs, 
+            "question": user_question
+         })
 
     print(response)
     return response
@@ -122,7 +129,7 @@ def main():
                 st.success("Done")
 
     # Main content area for displaying chat messages
-    st.title("Chateando con contenido del módulo de MI de ISEP 🤖")
+    st.title("Chateando con contenido de PDFs (ISEP) 🤖")
     st.write("Bienvenido al chat!")
     st.sidebar.button('Clear Chat History', on_click=clear_chat_history)
 
@@ -146,15 +153,10 @@ def main():
     if st.session_state.messages[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Estoy pensando..."):
-                response = user_input(prompt)
-                placeholder = st.empty()
-                full_response = ''
-                for item in response['output_text']:
-                    full_response += item
-                    placeholder.markdown(full_response)
-                placeholder.markdown(full_response)
+                response = st.write_stream(user_input(prompt))
+                
         if response is not None:
-            message = {"role": "assistant", "content": full_response}
+            message = {"role": "assistant", "content": response}
             st.session_state.messages.append(message)
 
 

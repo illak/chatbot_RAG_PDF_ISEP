@@ -12,7 +12,7 @@ Puede guiarse con el template `.env.example`.
 ```.env
 GOOGLE_API_KEY=your_api_key_here
 ```
-Luego, con docker instalado, se puede levantar la aplicación usando el siguiente comando:
+Luego, con [docker](https://www.docker.com/) instalado, se puede levantar la aplicación usando el siguiente comando:
 
 ```bash
 docker compose up --build
