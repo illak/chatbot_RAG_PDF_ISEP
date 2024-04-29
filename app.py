@@ -1,5 +1,7 @@
 import os
 from PyPDF2 import PdfReader
+import pdfplumber
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 
@@ -57,30 +59,30 @@ def load_pdf_text():
         f = os.path.join(directory, filename)
         # checking if it is a file
         if os.path.isfile(f):
-            print(f)
-            pdf_reader = PdfReader(f)
-            for page in pdf_reader.pages:
-                text += page.extract_text()
 
-                # Limpieza
-                text = re.sub(r" +", " ", text)
-                text = re.sub(r'\n', ' ', text)
+            print(f)
+
+            with pdfplumber.open(f) as pdf:
+                print(len(pdf.pages))
+                for page in pdf.pages:
+                    text += page.extract_text().strip()
+
+                    # Limpieza
+                    text = re.sub(r" +", " ", text)
+                    text = re.sub(r'\n', ' ', text)
 
     return text
 
 
 # split text into chunks
-
-
 def get_text_chunks(text):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=2000, chunk_overlap=400) # chunk_overlap 1000
     chunks = splitter.split_text(text)
     return chunks  # list of strings
 
+
 # get embeddings for each chunk
-
-
 def get_vector_store(chunks):
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001")  # type: ignore
@@ -92,15 +94,11 @@ def get_conversational_chain():
 
     prompt_template = """
     Responder a la pregunta del usuario lo más detallademente posible. Si la respuesta no se encuentra
-    en el contexto provisto responder: "Lo siento, no tengo información al respecto...", no devuelva una respuesta incorrecta.
-    Si encuentra la respuesta en el contexto provisto, agregar información externa, que no esté en el contexto, que contribuya
-    o deje una reflexión sobre la respuesta encontrada en caso de que sea posible.\n
+    en el contexto provisto responder: "Lo siento, no tengo información al respecto...", no devuelva una respuesta incorrecta.\n\n
 
-    -------------------------------\n
-    Contexto: {context}\n
-    -------------------------------\n
+    Contexto: {context}\n\n
 
-    Pregunta del usuario: {question}\n
+    Pregunta: {question}\n
 
     Respuesta:
     """
