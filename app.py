@@ -6,6 +6,8 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import CharacterTextSplitter
+
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import streamlit as st
 import google.generativeai as genai
@@ -18,6 +20,11 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 
 from google.generativeai.types.safety_types import HarmBlockThreshold, HarmCategory
+
+from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnablePassthrough
+
+
 
 SAFETY_SETTINGS = {
     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
@@ -48,6 +55,7 @@ def get_pdf_text(pdf_docs):
 
     return text
 
+
 def load_pdf_text():
     text = ""
 
@@ -55,7 +63,7 @@ def load_pdf_text():
  
     # iterate over files in
     # that directory
-    for filename in os.listdir(directory):
+    for filename in os.listdir(directory)[:1]:
         f = os.path.join(directory, filename)
         # checking if it is a file
         if os.path.isfile(f):
@@ -64,21 +72,48 @@ def load_pdf_text():
 
             with pdfplumber.open(f) as pdf:
                 print(len(pdf.pages))
+                for i in [0,1,2,5,7,10,12,22,45]:
+                    print(pdf.pages[i].extract_text())
+                    print("\n=====================================================================================\n")
+
                 for page in pdf.pages:
-                    text += page.extract_text().strip()
+                    text += page.extract_text()
+
+                    
 
                     # Limpieza
-                    text = re.sub(r" +", " ", text)
-                    text = re.sub(r'\n', ' ', text)
+                    #text = re.sub(r" +", " ", text)
+                    #text = re.sub(r'\n', ' ', text)
+                    text = re.sub(r'(?<=\w)\n(?=\w|$)', ' ', text)
 
     return text
 
 
 # split text into chunks
 def get_text_chunks(text):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=2000, chunk_overlap=400) # chunk_overlap 1000
+    #splitter = RecursiveCharacterTextSplitter(
+    #    chunk_size=2000, chunk_overlap=0) # chunk_overlap 1000
+
+    splitter = CharacterTextSplitter(
+        separator="",
+        chunk_size=2000,
+        chunk_overlap=500,
+        length_function=len,
+    )
+
+    print(len(text))
     chunks = splitter.split_text(text)
+
+    for i in range(7):
+        print(chunks[i])
+        print("\n-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o\n")
+
+    print("\nOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO")
+    
+    for i in [34,35,36,37,38,39,40]:
+        print(chunks[i])
+        print("\n-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o-o\n")
+
     return chunks  # list of strings
 
 
@@ -90,32 +125,46 @@ def get_vector_store(chunks):
     vector_store.save_local("faiss_index")
 
 
-def get_conversational_chain():
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
 
-    prompt_template = """
-    Responder a la pregunta del usuario lo más detallademente posible. Si la respuesta no se encuentra
-    en el contexto provisto responder: "Lo siento, no tengo información al respecto...", no devuelva una respuesta incorrecta.\n\n
+def debug_prompt(x):
+    print(x)
+    return x
 
-    Contexto: {context}\n\n
 
-    Pregunta: {question}\n
+# testing
+def get_conversational_chain(db):
 
-    Respuesta:
-    """
+    prompt_template = """Responder a la pregunta del usuario lo más detallademente posible. Si la respuesta no se encuentra
+en el contexto provisto responda que no encontró información en dicho contexto, no devuelva una respuesta incorrecta.\n\n
+
+Contexto: {context}\n\n
+
+Pregunta: {question}\n
+
+Respuesta:
+"""
 
     model = ChatGoogleGenerativeAI(model="gemini-pro",
                                    client=genai,
                                    temperature=0.3,
-                                   maxOutputTokens=2000,
+                                   maxOutputTokens=2500,
                                    safety_settings=SAFETY_SETTINGS
                                    )
     
     prompt = PromptTemplate(template=prompt_template,
                             input_variables=["context", "question"])
     
-    chain = load_qa_chain(llm=model, chain_type="stuff", prompt=prompt)
+    #chain = load_qa_chain(llm=model, chain_type="stuff", prompt=prompt)
 
-    #chain = prompt | model | StrOutputParser()
+    chain = (
+        {"context": db | format_docs, "question": RunnablePassthrough()}
+        | prompt 
+        | debug_prompt
+        | model 
+        | StrOutputParser()
+    )
 
     return chain
 
@@ -131,25 +180,29 @@ def user_input(user_question):
 
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     
-    docs = new_db.similarity_search(user_question)
+    docs = new_db.similarity_search(user_question, k = 6)
 
     print(len(docs))
     print("\n%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n")
     print(docs)
     print("\n%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n")
 
-    chain = get_conversational_chain()
+    #chain = get_conversational_chain()
+    chain = get_conversational_chain(new_db.as_retriever())
     
     #response = chain.stream({
     #        "context": docs, 
     #        "question": user_question
     #     })
 
-    response = chain(
-        {"input_documents": docs, "question": user_question}, return_only_outputs=True, )
+    #response = chain(
+     #   {"input_documents": docs, "question": user_question}, return_only_outputs=True, )
+
+    response = chain.invoke(user_question)
 
     print(response)
     return response
+
 
 @st.cache_resource
 def initialize_vector_db():
@@ -211,10 +264,11 @@ def main():
                 #response = st.write_stream(user_input(prompt))
                 response = user_input(prompt)
                 placeholder = st.empty()
-                full_response = ''
-                for item in response['output_text']:
-                    full_response += item
-                    placeholder.markdown(full_response)
+                full_response = response
+                #full_response = ''
+                #for item in response['output_text']:
+                #    full_response += item
+                #    placeholder.markdown(full_response)
                 placeholder.markdown(full_response)
                 
         if response is not None:
